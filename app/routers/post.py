@@ -8,6 +8,7 @@ from sqlalchemy import func
 from .. import models, schemas, oauth2
 from ..database import get_db
 from ..models import Post
+from sqlalchemy.dialects import postgresql
 
 
 router = APIRouter(
@@ -16,20 +17,38 @@ router = APIRouter(
 )
 
 
-# @router.get("/", response_model=List[schemas.Post])
-@router.get("/", response_model=List[schemas.PostOut])
-def get_posts(db: Session = Depends(get_db), current_user: int = Depends(oauth2.get_current_user), limit: int = 10, skip: int = 0, search: Optional[str] = ""):
+@router.get("/", response_model=List[schemas.PostWithVotes])
+# @router.get("/")
+def get_posts(db: Session = Depends(get_db), current_user: int = Depends(oauth2.get_current_user), search:str="",limit: int = 10, skip: int = 0)  :
     print("Current user ID:", current_user.id)
+    # results=db.query(Post,func.count(models.Votes.post_id).label("votes_count")).join(models.Votes,models.Votes.post_id==Post.id,isouter=True).group_by(models.Votes.post_id).group_by(Post.id)
+    # print(results.statement.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+    # for post, votes in results:
+    #     print(post.id, post.title, post.content, votes)
     
-    print("Fetching posts...")
+    
+    results=db.query(Post,func.count(models.Votes.post_id).label("votes_count")).join(models.Votes,models.Votes.post_id==Post.id,isouter=True).group_by(models.Votes.post_id).group_by(Post.id).filter(Post.title.contains(search)).limit(limit).offset(skip).all()    
+    items = []
+    for post, votes in results:
+        items.append({
+            "id": post.id,
+            "title": post.title,
+            "content": post.content,
+            "published": post.published,
+            "created_at": post.created_at,
+            "owner_id": post.owner_id,
+            "owner": post.owner,   # works because from_attributes=True
+            "votes": votes,
+        })
+    return items  # must return a list (never None)
 
-    if search:
-       posts=db.query(Post).filter(Post.title.contains(search)).limit(limit).offset(skip).all()
+    # if search:
+    #    posts=db.query(Post).filter(Post.title.contains(search)).limit(limit).offset(skip).all()
        
-    posts = db.query(Post).limit(limit).offset(skip).all()
-    print(posts)
+    # posts = db.query(Post).limit(limit).offset(skip).all()
+    # print(posts)
 
-    return [schemas.PostOut.model_validate(post) for post in posts]
+    
 
 
 @router.post("/", status_code=status.HTTP_201_CREATED, response_model=schemas.PostSchema)
